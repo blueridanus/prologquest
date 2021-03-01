@@ -88,7 +88,7 @@ check_safety(Goal) :-
 try_extend(Query, Result) :- 
     catch((
         check_safety(Query),
-        engine_create(Query,Query,Engine),
+        engine_create(Query,Query,Engine, [stack(150000000)]),
         engine_next_reified(Engine, Output), 
         Result = Output
     ), Err, Result = exception(Err)).
