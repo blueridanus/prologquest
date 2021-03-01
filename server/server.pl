@@ -1,10 +1,12 @@
 :- use_module(library(socket)).
 :- use_module(library(sandbox)).
 :- use_module('discord_emoji', [discord_emoji/2, discord_emoji/1, debug_emoji/1]).
+:- use_module(library(clpfd)).
 
 custom_safe(assertz(X)) :- custom_safe_assert(X).
 custom_safe(asserta(X)) :- custom_safe_assert(X).
 custom_safe(assert(X)) :- custom_safe_assert(X).
+custom_safe(X #= Y).
 
 custom_safe_assert(_).
 
