@@ -32,13 +32,13 @@ process_client(Socket, Peer) :-
 
 handle_service(StreamPair) :- 
     stream_pair(StreamPair, ReadStream, WriteStream),
-    try_parse_from_stream(ReadStream, ParseResult),
-    handle_parsed(WriteStream, ParseResult).
+    try_parse_from_stream(ReadStream, ParseResult, VarNames),
+    handle_parsed(WriteStream, ParseResult, VarNames).
 
-handle_parsed(WriteStream, ParseResult) :- 
+handle_parsed(WriteStream, ParseResult, VarNames) :- 
     (   
         ParseResult = ok(Query),
-        try_query_and_write_result(WriteStream, Query),
+        try_query_and_write_result(WriteStream, Query, VarNames),
         flush_output(WriteStream)
     );
     (
@@ -48,31 +48,38 @@ handle_parsed(WriteStream, ParseResult) :-
         flush_output(WriteStream)
     ).
 
-try_query_and_write_result(WriteStream, Query) :- 
-    (
-        ground(Query),
-        try_extend(Query, Result),
-        write_result(WriteStream, Result, base)
-    );
-    (
-        try_extend(Query, Result),
-        write_result(WriteStream, Result, non_base)
-    ).
+try_query_and_write_result(WriteStream, Query, VarNames) :- 
+    try_extend(Query, Result),
+    write_result(WriteStream, Result, Query, VarNames).
 
-
-write_result(WriteStream, exception(Err), _) :- 
+write_result(WriteStream, exception(Err), _, _) :- 
     write(WriteStream, "Query error: "),
     message_to_string(Err, ErrorMessage),
     write(WriteStream, ErrorMessage).
 
-write_result(WriteStream, the(_), base) :- 
-    write(WriteStream,"true.").
-
-write_result(WriteStream, the(Output), non_base) :- 
-    write(WriteStream,Output).
-
-write_result(WriteStream, no, _) :- 
+write_result(WriteStream, no, _, _) :- 
     write(WriteStream, "false.").
+
+write_result(WriteStream, the(Output), Query, VarNames) :- 
+    Query =@= Output
+    -> write(WriteStream,"true.")
+    ; (
+        unifiable(Query, Output, Bindings),
+        write_all_bindings(WriteStream, Bindings, VarNames)
+    ).
+
+write_all_bindings(WriteStream, [], _).
+write_all_bindings(WriteStream, [Binding|T], Names) :-
+    (T = []
+        -> 
+        write_binding(WriteStream, Binding, Names), write(WriteStream,".\n")
+        ;
+        write_binding(WriteStream, Binding, Names), write(WriteStream,",\n")
+    ),
+    write_all_bindings(WriteStream, T, Names).
+
+write_binding(WriteStream, Binding, Names) :-
+    write_term(WriteStream, Binding, [variable_names(Names)]).
 
 check_safety(Goal) :- 
     custom_safe(Goal);
@@ -85,14 +92,12 @@ try_extend(Query, Result) :-
         engine_next_reified(Engine, Output), 
         Result = Output
     ), Err, Result = exception(Err)).
-    
-    
 
-try_parse_from_stream(ReadStream, Result) :-
-    catch(parse_from_stream(ReadStream, Result), Err, Result = Err).
+try_parse_from_stream(ReadStream, Result, VarNames) :-
+    catch(parse_from_stream(ReadStream, Result, VarNames), Err, Result = Err).
 
-parse_from_stream(ReadStream, Result) :-
+parse_from_stream(ReadStream, Result, VarNames) :-
     Result = ok(Output),
-    read(ReadStream, Output).
+    read_term(ReadStream, Output, [variable_names(VarNames)]).
 
 :- initialization(create_server(3966)).
