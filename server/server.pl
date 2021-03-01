@@ -94,3 +94,5 @@ try_parse_from_stream(ReadStream, Result) :-
 parse_from_stream(ReadStream, Result) :-
     Result = ok(Output),
     read(ReadStream, Output).
+
+:- initialization(create_server(3966)).
