@@ -21,7 +21,7 @@ dispatch(AcceptFd) :-
     tcp_accept(AcceptFd, Socket, Peer),
     thread_create(process_client(Socket, Peer), _,
                     [ detached(true),
-                    stack(85000000)
+                    stack_limit(85000000)
                     ]),
     dispatch(AcceptFd).
 
