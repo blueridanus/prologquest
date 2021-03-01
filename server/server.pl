@@ -5,10 +5,8 @@
 custom_safe(assertz(X)) :- custom_safe_assert(X).
 custom_safe(asserta(X)) :- custom_safe_assert(X).
 custom_safe(assert(X)) :- custom_safe_assert(X).
-custom_safe(discord_emoji(_, _)).
-custom_safe(debug_emoji(_)).
 
-custom_safe_assert(_Head:-_Body).
+custom_safe_assert(_).
 
 create_server(Port) :-
     tcp_socket(Socket),
