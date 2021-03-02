@@ -3,12 +3,14 @@
 :- use_module('discord_emoji', [discord_emoji/2, discord_emoji/1, debug_emoji/1]).
 :- use_module(library(clpfd)).
 
-custom_safe(assertz(X)) :- custom_safe_assert(X).
-custom_safe(asserta(X)) :- custom_safe_assert(X).
-custom_safe(assert(X)) :- custom_safe_assert(X).
-custom_safe(X #= Y).
+:- multifile sandbox:safe_primitive/1.
 
-custom_safe_assert(_).
+sandbox:safe_primitive(assertz(_)).
+sandbox:safe_primitive(asserta(_)).
+sandbox:safe_primitive(assert(_)).
+sandbox:safe_primitive(retract(_)).
+
+:- initialization(create_server(3966)).
 
 create_server(Port) :-
     tcp_socket(Socket),
@@ -85,13 +87,9 @@ write_all_bindings(WriteStream, [Binding|T], Names) :-
 write_binding(WriteStream, Binding, Names) :-
     write_term(WriteStream, Binding, [variable_names(Names)]).
 
-check_safety(Goal) :- 
-    custom_safe(Goal);
-    safe_goal(Goal).
-
 try_extend(Query, Result) :- 
     catch((
-        check_safety(Query),
+        safe_goal(Query),
         engine_create(Query,Query,Engine, [stack(60000000)]),
         engine_next_reified(Engine, Output), 
         Result = Output
@@ -103,5 +101,3 @@ try_parse_from_stream(ReadStream, Result, VarNames) :-
 parse_from_stream(ReadStream, Result, VarNames) :-
     Result = ok(Output),
     read_term(ReadStream, Output, [variable_names(VarNames)]).
-
-:- initialization(create_server(3966)).
