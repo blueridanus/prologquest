@@ -48,8 +48,8 @@ handle_parsed(WriteStream, ParseResult, VarNames) :-
         flush_output(WriteStream)
     );
     (
-        ParseResult = error(_, JustError),
-        message_to_string(error("", JustError), ErrorMessage),
+        ParseResult = error(_, _),
+        message_to_string(ParseResult, ErrorMessage),
         write(WriteStream, ErrorMessage),
         flush_output(WriteStream)
     ).
