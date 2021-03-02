@@ -32,7 +32,10 @@ process_client(Socket, Peer) :-
         close(StreamPair)).
 
 handle_service(StreamPair) :- 
+    set_stream(StreamPair, encoding(utf8)),
+    set_stream(StreamPair, representation_errors(prolog)),
     stream_pair(StreamPair, ReadStream, WriteStream),
+    write(Encoding),
     try_parse_from_stream(ReadStream, ParseResult, VarNames),
     handle_parsed(WriteStream, ParseResult, VarNames).
 
