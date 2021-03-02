@@ -43,7 +43,9 @@ impl EventHandler for Handler {
             };
 
             lazy_static! { 
-                static ref DEMOJIFY_REGEX: Regex = Regex::new(r#"(<a?:[[:alpha:]]+:\d+>)|([\p{emoji}\p{emod}\p{ecomp}&&[^\d]]+)"#).unwrap(); // this is very cursed
+                static ref DEMOJIFY_REGEX: Regex = 
+                    // this is very cursed.
+                    Regex::new(r#"(<a?:[[:alpha:]]+:\d+>)|([\p{emoji}\p{emod}\p{ecomp}&&[^\d\*\#]]+)"#).unwrap(); 
                 static ref EMOJIFY_REGEX: Regex = Regex::new(r#"emoji\(([^\)]+)\)"#).unwrap(); 
             }
 
