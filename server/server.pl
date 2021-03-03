@@ -78,14 +78,31 @@ write_all_bindings(WriteStream, [], _).
 write_all_bindings(WriteStream, [Binding|T], Names) :-
     (T = []
         -> 
-        write_binding(WriteStream, Binding, Names), write(WriteStream,".\n")
+        write_binding(WriteStream, Binding, Names, ".\n")
         ;
-        write_binding(WriteStream, Binding, Names), write(WriteStream,",\n")
+        write_binding(WriteStream, Binding, Names, ",\n")
     ),
     write_all_bindings(WriteStream, T, Names).
 
-write_binding(WriteStream, Binding, Names) :-
-    write_term(WriteStream, Binding, [variable_names(Names)]).
+
+write_binding(WriteStream, Binding, Names, Separator) :-
+    is_named(Binding, Names)
+    ->
+        write_term(WriteStream, Binding, [variable_names(Names)]),
+        write(WriteStream, Separator).
+    
+
+is_named(Binding, Names) :-
+    member(Name, Names),
+    split_eq_term(Binding, Variable, _),
+    split_eq_term(Name, _, Variable).
+
+split_eq_term(Term, Variable, Value) :-
+    term_string(Term, String),
+    sub_string(String, Before, _, After, "="),
+    !,
+    sub_atom(String, 0, Before, _, Variable),
+    sub_string(String, _, After, 0, Value).
 
 try_extend(Query, Result) :- 
     catch((
