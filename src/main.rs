@@ -4,139 +4,101 @@ use serenity::{
     prelude::*,
 };
 
-use tokio::{
-    net::{TcpStream},
-    io::{AsyncWriteExt, AsyncReadExt},
-    
-};
+use tracing::{info, error, Level};
+use tracing_subscriber::FmtSubscriber;
 
-use regex::{Regex, Captures};
-use lazy_static::lazy_static;
+mod command;
+
+use command::{Command, Query, OpenQueries};
+
+
+struct Queries {}
+
+impl TypeMapKey for Queries {
+    type Value = OpenQueries;
+}
 
 struct Handler;
 
-#[async_trait]
-impl EventHandler for Handler {
-    async fn message(&self, ctx: Context, msg: Message) {
-        lazy_static! {
-            static ref CMD_PREFIX_REGEX: Regex = Regex::new(r"^\?\-[ \n]*(?:```)?(?:prolog|pl)?[ \n]*").unwrap();
-            static ref BERATE_PREFIX_REGEX: Regex = Regex::new(r"^\-\?").unwrap();
-            static ref BERATE_PERIOD_REGEX: Regex = Regex::new(r"^\?\-[^\.]+$").unwrap();
+impl Handler {
+    async fn handle_query(ctx: Context, msg: Message, code: String) {
+        let mut query = Query::open(code);
+        {
+            let data = ctx.data.read().await;
+            let queries = data.get::<Queries>().unwrap();
+            queries.map.write().await.insert(msg.id,query.get_command_sender());
         }
-        dbg!("Msg handle: {}", msg.content.as_str());
 
-        if let Some(mtch) = CMD_PREFIX_REGEX.find(msg.content.as_str()){
-            dbg!("Regex match");
-            let mut stream = match TcpStream::connect("127.0.0.1:3966").await {
-                Ok(s) => s,
-                Err(serv_err) => { 
-                    if let Err(msg_err) = msg.channel_id.say(
-                        &ctx.http, 
-                        format!("Fucky wucky connecting to prolog server: {}", serv_err)
-                    ).await {
-                        println!("Double fucky wucky when sending fucky wucky message (after trying to connect to pl server)");
-                        println!("Server error: {}", serv_err);
-                        println!("Discord error: {}", msg_err);
-                    } 
-                    return;
-                },
-            };
+        loop {
+            info!("Iteration.");
+            let response = query.next_effect().await;
 
-            lazy_static! { 
-                static ref DEMOJIFY_REGEX: Regex = 
-                    // this is very cursed.
-                    Regex::new(r#"(<a?:[[:alpha:]]+:\d+>)|([\p{emoji}\p{emod}\p{ecomp}&&[^\d\*\#]]+)"#).unwrap(); 
-                static ref EMOJIFY_REGEX: Regex = Regex::new(r#"emoji\(([^\)]+)\)"#).unwrap(); 
-            }
-
-            let mut query_str = &msg.content[mtch.end()..];
-            if(query_str.ends_with("```")){ //fixme this whole hack lol
-                query_str = &query_str[..query_str.len()-3];
-            }
-
-            let d_str = String::from(query_str);
-            println!("Checking for demojify: {}", DEMOJIFY_REGEX.is_match(&d_str));
-            let d_str = DEMOJIFY_REGEX.replace_all(d_str.as_str(), |captures: &Captures| {
-                println!("demojifying!");
-                format!("emoji(\"{}\")", captures.get(0).unwrap().as_str()) // FIXME: unwrap
-            });
-            println!("{}", d_str);
-
-            if let Err(serv_err) = stream.write_all(d_str.as_bytes()).await {
-                if let Err(msg_err) = msg.channel_id.say(
-                    &ctx.http, 
-                    format!("Fucky wucky sending query to prolog server: {}", serv_err)
-                ).await {
-                    println!("Double fucky wucky when sending fucky wucky message (after trying to send query to pl server)");
-                    println!("Server error: {}", serv_err);
-                    println!("Discord error: {}", msg_err);
-                } 
-                return;
-            }
-            
-            
-            if let Err(serv_err) = stream.shutdown().await {
-                if let Err(msg_err) = msg.channel_id.say(
-                    &ctx.http, 
-                    format!("Fucky wucky finishing write stream to prolog server: {}", serv_err)
-                ).await {
-                    println!("Double fucky wucky when sending fucky wucky message (after trying to finish write stream to pl server)");
-                    println!("Server error: {}", serv_err);
-                    println!("Discord error: {}", msg_err);
-                } 
-                return;
-            };
-
-            let mut response = String::new();
-
-            if let Err(serv_err) = stream.read_to_string(&mut response).await {
-                
-                if let Err(msg_err) = msg.channel_id.say(
-                    &ctx.http,
-                    format!("Fucky wucky getting response from prolog server: {}", serv_err)
-                ).await {
-                    println!("Double fucky wucky when sending fucky wucky message (after trying to receive response from pl server)");
-                    println!("Server error: {}", serv_err);
-                    println!("Discord error: {}", msg_err);
+            match response {
+                Some(maybe_effect) => match maybe_effect {
+                    Ok(effect) => if let Err(why) = effect.handle(&ctx, &msg).await {
+                        return why.relate(&ctx, &msg).await;
+                    },
+                    Err(why) => return why.relate(&ctx, &msg).await,
                 }
+                None => return,
             }
-
-            let response = EMOJIFY_REGEX.replace_all(response.as_str(), |captures: &Captures| { match captures.get(1) {
-                Some(m) => String::from(m.as_str()),
-                None => String::from(""), // thonk, maybe unreachable!()?
-            }});
-
-            if let Err(msg_err) = msg.channel_id.say(&ctx.http, response).await {
-                println!("Received query response sucesfully, but fucky wucky sending the message to Discord: {}", msg_err)
-            };
-
-        }
-
-        if BERATE_PREFIX_REGEX.is_match(msg.content.as_str()) {
-            msg.channel_id.say(&ctx.http, "HOLY SHIT ITS ?- NOT -? COME ON").await; // ignoring Result lol
-        }
-
-        if BERATE_PERIOD_REGEX.is_match(msg.content.as_str()) {
-            msg.channel_id.say(&ctx.http, "HOLY SHIT STOP FORGETTING THE PERIOD").await; // ignoring Result lol
         }
 
     }
 
-    async fn ready(&self, _: Context, ready: Ready) {
-        println!("{} is connected!", ready.user.name);
+    async fn handle_extend(_ctx: Context, _msg: Message, _code: String) {
+        unimplemented!();
+    }
+}
+
+#[async_trait]
+impl EventHandler for Handler {
+    async fn message(&self, ctx: Context, msg: Message) {
+        info!("Got message: {}", msg.content);
+        if let Some(command) = Command::parse(&msg) {
+            info!("Command parsed: {:?}", command);
+            use Command::*;
+            match command {
+                Query(code) => Self::handle_query(ctx, msg, code).await,
+                Extend(code) => Self::handle_extend(ctx, msg, code).await,
+                _ => unreachable!(),
+            }
+        } 
+    }
+
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        let mut data = ctx.data.write().await;
+
+        data.insert::<Queries>(OpenQueries::default());
+
+        info!("{} is connected!", ready.user.name);
     }
 }
 
 #[tokio::main]
 async fn main() {
-    let token = String::from(std::env::var("BOT_API_TOKEN").unwrap());
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::INFO)
+        .finish();
 
-    let mut client = Client::builder(&token)
+    tracing::subscriber::set_global_default(subscriber)
+        .expect("Failed to start tracing");
+
+    let token = match std::env::var("BOT_API_TOKEN") {
+        Ok(v) => String::from(v),
+        Err(why) => return error!("Could not read BOT_API_TOKEN: {}", why),
+    };
+
+    let client = Client::builder(&token)
         .event_handler(Handler)
-        .await
-        .expect("Err creating client");
+        .await;
+    
+    let mut client = match client {
+        Ok(c) => c,
+        Err(why) => return error!("Failed to create discord client: {}", why),
+    };
 
     if let Err(why) = client.start().await {
-        println!("Client error: {:?}", why);
+        error!("Failed to start discord client: {}", why);
     }
 }
