@@ -16,6 +16,7 @@ sandbox:safe_primitive(retract(_)).
 % execute_command(Context, Command, ProcessedContext).
 execute_command(Context, query(QueryString), ProcessedContext) :-
     try_parse_query(QueryString, ParseResult, VarNames),
+    post_effect(Context.effect_stream, Context.effect_mutex, ok),
     answer_query(Context, ParseResult, VarNames, ProcessedContext).
 
 execute_command(Context, extend(RulesString), ProcessedContext).
@@ -43,8 +44,12 @@ make_context(Context, EffectStream) :-
 %start_engine(Context, Goal, StartedContext) :-
 
 post_effect(EffectStream, EffectMutex, Effect) :- 
+    format("Posting effect: ~w~n", [Effect]),
+    format("Stream: ~w, Mutex: ~w~n", [EffectStream, EffectMutex]),
     mutex_lock(EffectMutex),
+    format("Writing effect: ~w~n", [Effect]),
     write_effect(EffectStream, Effect),
+    format("Effect written: ~w~n", [Effect]),
     mutex_unlock(EffectMutex).
 
 try_parse_query(QueryString, Result, VarNames) :-
@@ -52,42 +57,72 @@ try_parse_query(QueryString, Result, VarNames) :-
 
 parse_query(QueryString, Result, VarNames) :-
     Result = ok(Output),
-    read_term(QueryString, Output, [variable_names(VarNames)]).
+    read_term_from_atom(QueryString, Output, [variable_names(VarNames)]).
 
 answer_query(Context, ok(Query), VarNames, ProcessedContext) :-
-    catch(safe_goal(Query), SafetyError, answer_query(Context, bad(SafetyError), _, _)).
+    catch((
+            safe_goal(Query),
+            answer_safe_query(Context, Query, VarNames, ProcessedContext)
+        ),
+        SafetyError,
+        answer_query(Context, bad(SafetyError), _, _)
+    ).
 
 % FIXME: writing effects is not atomic, thread may be halted while writing to stream! 
 % message effects back from spawned thread instead, so those can always be properly written
 answer_safe_query(Context, Query, VarNames, ProcessedContext) :-
-    engine_create(Query,Query,QueryEngine,[stack(60000000)]),
     thread_create(
-        query_thread(QueryEngine, Context.effect_stream, Context.effect_mutex),
+        init_query_thread(Query, VarNames, Context.effect_stream, Context.effect_mutex),
         EngineThread,
         [stack(70000000)]
     ),
+    thread_send_message(EngineThread, next_answer),
     ProcessedContext = Context
         .put(current_engine_thread, EngineThread)
         .put(current_engine, QueryEngine).
 
+user:message_hook(Term, Kind, Lines) :-
+    Kind \= silent, 
+    engine_self(EngineId),
+    format("Message hook called: ~w~n", [Term]),
+    get_effect_output(EngineId, EffectStream, EffectMutex),
+    format("Pair acquired: ~w, ~w~n", [EffectStream, EffectMutex]),
+    print_message_lines(string(String), "", Lines),
+    post_effect(EffectStream, EffectMutex, answer(String)).
+
+init_query_thread(Query, Bindings, EffectStream, EffectMutex) :-
+    %engine_create(Bindings, '$execute_query'(Query, _, _), QueryEngine, [stack(60000000)]),
+    engine_create(Bindings, (
+        '$execute_query'(Query, Bindings, _)
+    ), QueryEngine, [stack(60000000)]),
+    assertz(get_effect_output(QueryEngine, EffectStream, EffectMutex)),
+    query_thread(QueryEngine, EffectStream, EffectMutex).
+
 query_thread(Engine, EffectStream, EffectMutex) :-
     thread_get_message(Message),
-    Message = answer,
+    Message = next_answer,
     engine_next_reified(Engine, Result),
     (
-        Result = the(Answer),
-        with_output_to(string(String), pretty_result(Answer)),
-        post_effect(EffectStream, EffectMutex, answer(String))
-    ;
-        Result = no,
-        with_output_to(string(String), pretty_result(no)),
-        post_effect(EffectStream, EffectMutex, answer(String))
-    ;
-        Result = exception(Err),
-        with_output_to(string(String), pretty_error(Err)),
-        post_effect(EffectStream, EffectMutex, error(String))
+        Result = exception(_) -> 
+        pretty_error(Result) % fixme
     ),
     query_thread(Engine, EffectStream, EffectMutex).
 
 answer_query(Context, bad(ParseError), _, _) :-
     post_effect(Context.effect_stream, Context.effect_mutex, error(ParseError)).
+
+:- begin_tests(engine).
+
+test(simple) :-
+    new_memory_file(Mem), 
+    open_memory_file(Mem, write, WS, [encoding(octet)]),
+    make_context(Context, WS),
+    try_parse_query("X is 2+1, Y is 5+3.", ParseResult, VarNames),
+    answer_query(Context, ParseResult, VarNames, ProcessedContext),
+    sleep(5),
+    close(WS),
+    open_memory_file(Mem, read, RS, [encoding(octet)]),
+    current_output(Out),
+    copy_stream_data(RS, Out).
+
+:- end_tests(engine).

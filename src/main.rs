@@ -89,6 +89,8 @@ async fn main() {
         Err(why) => return error!("Could not read BOT_API_TOKEN: {}", why),
     };
 
+    info!("Token is {}", token);
+
     let client = Client::builder(&token)
         .event_handler(Handler)
         .await;

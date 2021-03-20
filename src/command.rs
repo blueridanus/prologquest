@@ -27,7 +27,7 @@ use serenity::{
     prelude::*,
     model::{
         channel::{Message, ReactionType},
-        id::{MessageId,},
+        id::{MessageId,EmojiId},
     }
 };
 
@@ -35,6 +35,7 @@ use lazy_static::lazy_static;
 use regex::{Regex, Captures};
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")] 
 pub enum Command {
     Query(String),
     Extend(String),
@@ -44,6 +45,7 @@ pub enum Command {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "snake_case")] 
 pub enum Effect {
     Ok,
     Answer(String),
@@ -149,7 +151,7 @@ impl Query {
             
             let codec = LengthDelimitedCodec::new().framed(socket);
 
-            let mut serialized = Framed::new(codec, formats::Bincode::default());
+            let mut serialized = Framed::new(codec, formats::Json::default());
 
             let query = Command::Query(code);
 
@@ -242,7 +244,11 @@ impl Effect {
 
         match self {
             Effect::Ok => {
-                let ok_emoji = ReactionType::Unicode(":white_check_mark:".into());
+                let ok_emoji = ReactionType::Custom{
+                    animated: false,
+                    id: EmojiId(822782191225798737),
+                    name: Some("swipl".into()),
+                };
 
                 if let Err(why) = msg.react(ctx.http.clone(), ok_emoji).await {
                     return Error::errored_when(why, "reacting to message with confirmation emoji").into();
@@ -252,7 +258,7 @@ impl Effect {
             Effect::More(more) => reply_to(ctx, msg, more).await?,
             Effect::Halted => unimplemented!(),
             Effect::Error(pl_err) => {
-                let error_emoji = ReactionType::Unicode(":x:".into());
+                let error_emoji = ReactionType::Unicode("❌".into());
 
                 if let Err(why) = msg.react(ctx.http.clone(), error_emoji).await {
                     return Error::errored_when(why, "reacting to message with error emoji").into();

@@ -44,7 +44,6 @@ handle_service(StreamPair) :-
     stream_pair(StreamPair, ReadStream, WriteStream),
     make_context(Context, WriteStream),
     commands_loop(ReadStream, Context).
-    
 
 commands_loop(ReadStream, Context) :-
     read_command(ReadStream, Command),

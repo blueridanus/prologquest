@@ -3,7 +3,7 @@
     pretty_result/1
 ]).
 
-pretty_error(Error) :- 
+pretty_error(exception(Error)) :- 
     print_message(error, Error).
 
 pretty_result(no) :- 
