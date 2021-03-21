@@ -68,6 +68,10 @@ answer_query(Context, ok(Query), VarNames, ProcessedContext) :-
         answer_query(Context, bad(SafetyError), _, _)
     ).
 
+answer_query(Context, bad(ParseError), _, _) :-
+    message_to_string(ParseError, ErrorString),
+    post_effect(Context.effect_stream, Context.effect_mutex, error(ErrorString)).
+
 % FIXME: writing effects is not atomic, thread may be halted while writing to stream! 
 % message effects back from spawned thread instead, so those can always be properly written
 answer_safe_query(Context, Query, VarNames, ProcessedContext) :-
@@ -107,9 +111,6 @@ query_thread(Engine, EffectStream, EffectMutex) :-
         pretty_error(Result) % fixme
     ),
     query_thread(Engine, EffectStream, EffectMutex).
-
-answer_query(Context, bad(ParseError), _, _) :-
-    post_effect(Context.effect_stream, Context.effect_mutex, error(ParseError)).
 
 :- begin_tests(engine).
 
