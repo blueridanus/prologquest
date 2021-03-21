@@ -197,36 +197,87 @@ pub struct OpenQueries {
     pub map: RwLock<HashMap<MessageId, mpsc::Sender<Command>>>,
 }
 
-impl Command {
-    fn get_prolog_code_str(mut msg_str: &str) -> String {
-        msg_str = msg_str[2..].trim();
-        if msg_str.starts_with("```") && msg_str.ends_with("```") {
-            return String::from(&msg_str[3 .. msg_str.len() - 3]);
+// of the form ``` ... ``` or ` ... `
+struct MarkdownCode {
+    pub language: Option<String>,
+    pub code: String,
+}
+
+struct ParseCodeBlockError;
+
+impl std::str::FromStr for MarkdownCode {
+    type Err = ParseCodeBlockError;
+    fn from_str(s: &str) -> std::result::Result<Self, Self::Err> {
+        if s.starts_with("```") && s.ends_with("```") {
+            let s = &s[3 .. (s.len() - 3)];
+
+            lazy_static! {
+                static ref CODEBLOCK_LANGUAGE_REGEXP: Regex = Regex::new(r"^([\w\-+]+)\s*\n").unwrap();
+            }
+
+            let (language, code_start_offset) = match CODEBLOCK_LANGUAGE_REGEXP.captures(s) {
+                None => (None, 0),
+                Some(caps) => {
+                    let c = caps.get(1).unwrap();
+                    ( Some(c.as_str().into()), c.end() )
+                },
+            };
+
+            let code = s[code_start_offset..].into();
+
+            return Ok( Self {
+                language,
+                code,
+            })
+
+        } else if s.starts_with("`") && s.ends_with("`") {
+            return Ok( Self {
+                language: None,
+                code: s[1 .. (s.len() - 1)].into(),
+            });
         } else {
-            return Self::emoji_to_atoms(msg_str);
+            return Err(ParseCodeBlockError);
+        }
+    }
+}
+
+impl Command {
+    fn get_prolog_code_str(msg_str: &str) -> String {
+        match msg_str.parse::<MarkdownCode>() {
+            Ok(block) => block.code,
+            Err(_) => Self::atomify_emoji(msg_str),
         }
     } 
 
-    fn emoji_to_atoms(code: &str) -> String {
+    fn atomify_emoji(code: &str) -> String {
         lazy_static! { 
-            static ref EMOJI_TO_ATOMS_REGEXP: Regex = 
+            static ref ATOMIFY_EMOJI_REGEXP: Regex = 
                 // this is very cursed.
                 Regex::new(r#"(<a?:[[:alpha:]]+:\d+>)|([\p{emoji}\p{emod}\p{ecomp}&&[^\d\*\#]]+)"#).unwrap(); 
         }
 
-        EMOJI_TO_ATOMS_REGEXP.replace_all(code, |captures: &Captures| {
+        ATOMIFY_EMOJI_REGEXP.replace_all(code, |captures: &Captures| {
             format!("emoji(\"{}\")", captures.get(0).unwrap().as_str()) // FIXME: unwrap
         }).into()
     }
 
     pub fn parse(msg: &Message) -> Option<Self> {
-       let msg_str = msg.content.as_str();
+        let msg_str = &msg.content.as_str();
+            
         if msg_str.starts_with("?-") {
+            let msg_str = &msg_str[2..]
+                .trim_start_matches(|c: char| c.is_whitespace() || c == '\n' );
+
             let code = Self::get_prolog_code_str(msg_str);
+            
             return Some(Command::Query(code));
         }
         if msg_str.starts_with(":-") {
+            let msg_str = &msg_str[2..]
+                .trim_start_matches(|c: char| c.is_whitespace() || c == '\n' );
+
             let code = Self::get_prolog_code_str(msg_str);
+
             return Some(Command::Extend(code));
         }
         None
