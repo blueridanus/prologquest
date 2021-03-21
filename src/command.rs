@@ -194,7 +194,26 @@ impl Query {
 
 #[derive(Default)]
 pub struct OpenQueries {
-    pub map: RwLock<HashMap<MessageId, mpsc::Sender<Command>>>,
+    pub map: RwLock<HashMap<MessageId, QueryInfo>>,
+}
+
+impl TypeMapKey for OpenQueries {
+    type Value = Self;
+}
+
+
+pub struct QueryInfo {
+    pub command_sink: mpsc::Sender<Command>,
+    pub current_answer: Option<Message>,
+}
+
+impl QueryInfo {
+    pub fn new(tx: mpsc::Sender<Command>) -> Self {
+        QueryInfo {
+            command_sink: tx,
+            current_answer: None,
+        }
+    }
 }
 
 // of the form ``` ... ``` or ` ... `
@@ -269,7 +288,7 @@ impl Command {
                 .trim_start_matches(|c: char| c.is_whitespace() || c == '\n' );
 
             let code = Self::get_prolog_code_str(msg_str);
-            
+
             return Some(Command::Query(code));
         }
         if msg_str.starts_with(":-") {
@@ -286,9 +305,9 @@ impl Command {
 
 impl Effect {
     pub async fn handle(&self, ctx: &Context, msg: &Message) -> Result<()> {
-        async fn reply_to(ctx: &Context, msg: &Message, with: impl std::fmt::Display) -> Result<()> {
+        async fn reply_to(ctx: &Context, msg: &Message, with: impl std::fmt::Display) -> Result<Message> {
             match msg.reply(ctx.http.clone(), with).await {
-                Ok(_) => Ok(()),
+                Ok(message) => Ok(message),
                 Err(err) => Error::errored_when(err, "replying to user").into(),
             }
         }
@@ -301,12 +320,63 @@ impl Effect {
                     name: Some("swipl".into()),
                 };
 
-                if let Err(why) = msg.react(ctx.http.clone(), ok_emoji).await {
+                if let Err(why) = msg.react(ctx, ok_emoji).await {
                     return Error::errored_when(why, "reacting to message with confirmation emoji").into();
                 }
             },
-            Effect::Answer(answer) => reply_to(ctx, msg, answer).await?,
-            Effect::More(more) => reply_to(ctx, msg, more).await?,
+            Effect::Answer(answer) => {
+                let data = ctx.data.read().await;
+                let open_queries = data.get::<OpenQueries>().unwrap();
+                let mut open_queries_map = open_queries.map.write().await;
+                let query = open_queries_map.get_mut(&msg.id).unwrap(); 
+
+                match query.current_answer {
+                        None => {  
+                            reply_to(ctx, msg, answer).await?;
+                        },
+                        Some(ref mut prev_answer) => {
+                            let prev = prev_answer.content.clone();
+                            let edit_result = prev_answer.edit(ctx, |m| {
+                                m.content(format!("{};\n{}", prev, answer))
+                            }).await;
+    
+                            if let Err(why) = edit_result {
+                                return Error::errored_when(why, "editing message to enumerate last answer").into();
+                            }
+
+                        } 
+                    } 
+                },
+            Effect::More(more) => {
+                let data = ctx.data.read().await;
+                let open_queries = data.get::<OpenQueries>().unwrap();
+                let mut open_queries_map = open_queries.map.write().await;
+                let query = open_queries_map.get_mut(&msg.id).unwrap();
+
+                match query.current_answer {
+                    None => {
+                        let enumerate_more_emoji = ReactionType::Unicode("➕".into());
+                        let answer = reply_to(ctx, msg, more).await?;
+
+                        if let Err(why) = msg.react(ctx, enumerate_more_emoji).await {
+                            return Error::errored_when(why, "reacting to message with enumerate more emoji").into();
+                        }
+                        
+                        query.current_answer = Some(answer);
+                    },
+                    Some(ref mut answer) => {
+                        let prev = answer.content.clone();
+                        let edit_result = answer.edit(ctx, |m| {
+                            m.content(format!("{};\n{}", prev, more))
+                        }).await;
+
+                        if let Err(why) = edit_result {
+                            return Error::errored_when(why, "editing message to enumerate more answers").into();
+                        }
+                    }
+                }
+
+            },
             Effect::Halted => unimplemented!(),
             Effect::Error(pl_err) => {
                 let error_emoji = ReactionType::Unicode("❌".into());
@@ -315,9 +385,9 @@ impl Effect {
                     return Error::errored_when(why, "reacting to message with error emoji").into();
                 }
 
-                reply_to(ctx, msg, pl_err).await?
+                reply_to(ctx, msg, pl_err).await?;
             },
-            Effect::Write(write) => reply_to(ctx, msg, write).await?,
+            Effect::Write(write) => { reply_to(ctx, msg, write).await?; },
             Effect::Read => unimplemented!(),
         };
 

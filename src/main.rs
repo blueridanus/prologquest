@@ -1,6 +1,10 @@
 use serenity::{
     async_trait,
-    model::{channel::Message, gateway::Ready},
+    model::{
+        channel::{Message, Reaction, ReactionType},
+        gateway::Ready,
+        id::UserId,
+    },
     prelude::*,
 };
 
@@ -9,14 +13,7 @@ use tracing_subscriber::FmtSubscriber;
 
 mod command;
 
-use command::{Command, Query, OpenQueries};
-
-
-struct Queries {}
-
-impl TypeMapKey for Queries {
-    type Value = OpenQueries;
-}
+use command::{Command, Query, QueryInfo, OpenQueries};
 
 struct Handler;
 
@@ -25,8 +22,11 @@ impl Handler {
         let mut query = Query::open(code);
         {
             let data = ctx.data.read().await;
-            let queries = data.get::<Queries>().unwrap();
-            queries.map.write().await.insert(msg.id,query.get_command_sender());
+            let queries = data.get::<OpenQueries>().unwrap();
+            queries.map
+                .write()
+                .await
+                .insert(msg.id, QueryInfo::new(query.get_command_sender()));
         }
 
         loop {
@@ -51,8 +51,22 @@ impl Handler {
     }
 }
 
+struct BotId;
+
+impl TypeMapKey for BotId {
+    type Value = UserId;
+}
+
 #[async_trait]
 impl EventHandler for Handler {
+    async fn ready(&self, ctx: Context, ready: Ready) {
+        let mut data = ctx.data.write().await;
+
+        data.insert::<OpenQueries>(OpenQueries::default());
+        data.insert::<BotId>(ready.user.id);
+        info!("{} is connected!", ready.user.name);
+    }
+
     async fn message(&self, ctx: Context, msg: Message) {
         info!("Got message: {}", msg.content);
         if let Some(command) = Command::parse(&msg) {
@@ -66,12 +80,22 @@ impl EventHandler for Handler {
         } 
     }
 
-    async fn ready(&self, ctx: Context, ready: Ready) {
-        let mut data = ctx.data.write().await;
+    async fn reaction_add(&self, ctx: Context, reaction: Reaction) {
+        info!("Reaction: {:?}", reaction);
+        let data = ctx.data.read().await;
+        let data_queries = data.get::<OpenQueries>().unwrap();
+        let bot_id = data.get::<BotId>().unwrap();
+        let queries = data_queries.map.read().await;
 
-        data.insert::<Queries>(OpenQueries::default());
-
-        info!("{} is connected!", ready.user.name);
+        let enumerate_more_emoji = ReactionType::Unicode("➕".into());
+        if reaction.emoji == enumerate_more_emoji && &reaction.user_id.unwrap() != bot_id {
+            info!("Emoji matches + emoji");
+            if let Some(query) = queries.get(&reaction.message_id) {
+                query.command_sink.send(Command::EnumerateMore).await.unwrap();
+                info!("Asked for more");
+            }
+        }
+        
     }
 }
 

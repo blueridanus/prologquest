@@ -47,5 +47,6 @@ handle_service(StreamPair) :-
 
 commands_loop(ReadStream, Context) :-
     read_command(ReadStream, Command),
+    format("Got command: ~w~n", [Command]),
     execute_command(Context, Command, ProcessedContext),
     commands_loop(ReadStream, ProcessedContext).
