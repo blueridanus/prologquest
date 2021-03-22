@@ -47,8 +47,7 @@ write_effect(WriteStream, Effect) :-
     ;   term_string(Data, String)
     ),
     format("Term string: ~w~n", [String]),
-    atom_json_term(Serialized, json([Name=String]), []),
-    
+    atom_json_term(Serialized, json([Name=String]), [as(string)]),
     write_serialized_effect(WriteStream, Serialized).
 
 write_serialized_effect(WriteStream, Serialized) :-
@@ -58,7 +57,9 @@ write_serialized_effect(WriteStream, Serialized) :-
     write(MemWriteStream, Serialized),
     close(MemWriteStream),
     size_memory_file(Mem, Size, octet),
+    set_stream(WriteStream, encoding(octet)),
     write_frame_size(WriteStream, Size),
+    set_stream(WriteStream, encoding(utf8)),
     write(WriteStream, Serialized),
     flush_output(WriteStream).
 
@@ -73,7 +74,14 @@ effect_declaration(read, simple).
 read_frame_size(ReadStream, Size) :-
     read_u32(ReadStream, Size).
 
-write_frame_size(ReadStream, Size) :-
-    write_u32(ReadStream, Size).
+write_frame_size(WriteStream, Size) :-
+    write_u32(WriteStream, Size).
 
-% -- Serialization of commands from stream
+:- begin_tests(commands_effects).
+
+test(unicode) :- 
+    new_memory_file(Mem),
+    open_memory_file(Mem, write, MemWriteStream, [encoding(octet)]),
+    write_effect(MemWriteStream, answer("X = emoji(\"🤌\")")).
+
+:- end_tests(commands_effects).
