@@ -8,9 +8,14 @@
 
 :- multifile sandbox:safe_primitive/1.
 
-sandbox:safe_primitive(assertz(_)).
-sandbox:safe_primitive(asserta(_)).
-sandbox:safe_primitive(retract(_)).
+sandbox:safe_primitive(assertz(C)) :- safe_rule(C).
+sandbox:safe_primitive(asserta(C)) :- safe_rule(C).
+sandbox:safe_primitive(retract(C)) :- safe_rule(C).
+
+safe_rule((M:Head :- Body)) :- !, M = user, safe_body(Body).
+safe_rule((Head :- Body)) :- safe_body(Body).
+
+safe_body(Body) :- safe_goal(Body).
 
 % execute_command(Context, Command, ProcessedContext).
 execute_command(Context, query(QueryString), ProcessedContext) :-
