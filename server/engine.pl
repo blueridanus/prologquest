@@ -12,10 +12,11 @@ sandbox:safe_primitive(assertz(C)) :- safe_rule(C).
 sandbox:safe_primitive(asserta(C)) :- safe_rule(C).
 sandbox:safe_primitive(retract(C)) :- safe_rule(C).
 
-safe_rule((M:Head :- Body)) :- !, M = user, safe_body(Body).
-safe_rule((Head :- Body)) :- safe_body(Body).
-
-safe_body(Body) :- safe_goal(Body).
+% only check done on assertions: make sure it's (re)defining on module `user`. 
+% should be enough, since trying to call an unsafe rule later should error out (sandboxing checks the body).
+safe_rule((user:Head :- Body)) :- !.
+safe_rule((Head :- Body)) :-
+    Head \= _:_.
 
 % execute_command(Context, Command, ProcessedContext).
 execute_command(Context, query(QueryString), ProcessedContext) :-
